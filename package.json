@@ -1,0 +1,116 @@
+{
+    "name": "furina-companion",
+    "displayName": "芙宁娜工作陪伴",
+    "description": "让枫丹水神芙宁娜陪伴你的 VS Code 工作之旅——戏剧化监督、番茄钟、任务拆解、情绪安抚",
+    "version": "0.1.0",
+    "publisher": "furina-studio",
+    "license": "MIT",
+    "icon": "media/furina-icon.png",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/westsmiles2405/Furina-skill.git"
+    },
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "furina-companion",
+                    "title": "芙宁娜",
+                    "icon": "media/furina-icon.svg"
+                }
+            ]
+        },
+        "views": {
+            "furina-companion": [
+                {
+                    "type": "webview",
+                    "id": "furina.chatPanel",
+                    "name": "芙宁娜的舞台"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "furina.openStage",
+                "title": "芙宁娜：开启今日舞台",
+                "category": "Furina"
+            },
+            {
+                "command": "furina.startPomodoro",
+                "title": "芙宁娜：开始番茄钟专注",
+                "category": "Furina"
+            },
+            {
+                "command": "furina.stopPomodoro",
+                "title": "芙宁娜：结束番茄钟",
+                "category": "Furina"
+            },
+            {
+                "command": "furina.encourageMe",
+                "title": "芙宁娜：给我打气",
+                "category": "Furina"
+            },
+            {
+                "command": "furina.reviewWork",
+                "title": "芙宁娜：审判我的代码",
+                "category": "Furina"
+            },
+            {
+                "command": "furina.finale",
+                "title": "芙宁娜：今日谢幕",
+                "category": "Furina"
+            }
+        ],
+        "configuration": {
+            "title": "芙宁娜工作陪伴",
+            "properties": {
+                "furina.pomodoroMinutes": {
+                    "type": "number",
+                    "default": 25,
+                    "description": "番茄钟专注时长（分钟）"
+                },
+                "furina.breakMinutes": {
+                    "type": "number",
+                    "default": 5,
+                    "description": "休息时长（分钟）"
+                },
+                "furina.enableIdleReminder": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "是否在长时间未操作时提醒"
+                },
+                "furina.idleMinutes": {
+                    "type": "number",
+                    "default": 30,
+                    "description": "闲置多少分钟后提醒"
+                },
+                "furina.enableStatusBar": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "是否在状态栏显示芙宁娜"
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "lint": "eslint src --ext ts"
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.0",
+        "@types/vscode": "^1.85.0",
+        "typescript": "^5.3.3"
+    }
+}
