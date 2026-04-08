@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { FurinaChatPanel } from './chatPanel';
 import { PomodoroTimer } from './pomodoro';
 import { IdleWatcher } from './idleWatcher';
+import { StatsTracker } from './stats';
 import {
     getTimeBasedGreeting,
     getEncourageLine,
@@ -12,13 +13,17 @@ import {
     getFinale,
     getWorkLine,
 } from './persona';
-import { generateResponse } from './dynamicReply';
+import { generateResponse, analyzeCodeProblems } from './dynamicReply';
 
 let chatPanel: FurinaChatPanel;
 let pomodoro: PomodoroTimer;
 let idleWatcher: IdleWatcher;
+let stats: StatsTracker;
 
 export function activate(context: vscode.ExtensionContext) {
+    // ─── 数据统计 ─────────────────────────────────────────
+    stats = new StatsTracker(context.globalState);
+
     // ─── 状态栏 ─────────────────────────────────────────
     const statusBar = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,
@@ -48,7 +53,11 @@ export function activate(context: vscode.ExtensionContext) {
     pomodoro = new PomodoroTimer(
         statusBar,
         (msg) => chatPanel.addFurinaMessage(msg),
-        (msg) => chatPanel.addFurinaMessage(msg)
+        (msg) => {
+            chatPanel.addFurinaMessage(msg);
+            stats.recordPomodoro();
+            chatPanel.updateStats(stats.data);
+        }
     );
 
     // ─── 闲置监测 ──────────────────────────────────────
@@ -144,25 +153,59 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ─── 用户消息回复 ─────────────────────────────────
     chatPanel.setOnUserMessage((text) => {
-        const reply = generateResponse(text);
-        chatPanel.addFurinaMessage(reply);
-    });
+        stats.recordMessage();
+        chatPanel.updateStats(stats.data);
 
-    // ─── 用户消息回复 ─────────────────────────────────
-    chatPanel.setOnUserMessage((text) => {
+        // 如果用户问代码状况，给出智能分析
+        const lower = text.toLowerCase();
+        if (
+            lower.includes('分析') ||
+            lower.includes('诊断') ||
+            lower.includes('检查代码') ||
+            lower.includes('代码质量') ||
+            lower.includes('有没有错')
+        ) {
+            const analysis = analyzeCodeProblems();
+            chatPanel.addFurinaMessage(analysis);
+            return;
+        }
+
         const reply = generateResponse(text);
         chatPanel.addFurinaMessage(reply);
     });
 
     // ─── 启动问候 ──────────────────────────────────────
-    const greeting = getTimeBasedGreeting();
-    chatPanel.addFurinaMessage(greeting);
+    const isFirstTime = !context.globalState.get<boolean>('furina.welcomed');
+    if (isFirstTime) {
+        context.globalState.update('furina.welcomed', true);
+        chatPanel.addFurinaMessage(
+            '欢迎来到芙宁娜的舞台！初次见面，容我自我介绍——我是枫丹的水之大导演，芙宁娜。'
+        );
+        chatPanel.addFurinaMessage(
+            '📌 小提示：\n' +
+            '• 在输入框跟我聊天，我会根据你说的话回复\n' +
+            '• 按 Ctrl+Shift+P 搜索"芙宁娜"查看所有命令\n' +
+            '• 试试"开始番茄钟专注"让我陪你计时\n' +
+            '• 说"检查代码"让我帮你分析当前错误'
+        );
+        chatPanel.addFurinaMessage(
+            '好了，介绍完毕。准备好了就开始工作吧——聚光灯已经落下来了，别发呆。'
+        );
+    } else {
+        const greeting = getTimeBasedGreeting();
+        chatPanel.addFurinaMessage(greeting);
+    }
+
+    // 初始推送统计
+    chatPanel.updateStats(stats.data);
 
     // 工作时偶尔插话
     let editCount = 0;
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(() => {
             editCount++;
+            stats.recordSave();
+            chatPanel.updateStats(stats.data);
             if (editCount % 10 === 0) {
                 const line = getWorkLine();
                 chatPanel.addFurinaMessage(line);

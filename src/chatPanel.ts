@@ -3,6 +3,7 @@
  */
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
+import type { FurinaStats } from './stats';
 
 function getNonce(): string {
     return crypto.randomBytes(16).toString('hex');
@@ -12,6 +13,7 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
     public static readonly viewType = 'furina.chatPanel';
     private view?: vscode.WebviewView;
     private messages: Array<{ role: 'furina' | 'user'; text: string }> = [];
+    private stats?: FurinaStats;
 
     private onUserMessage?: (text: string) => void;
 
@@ -41,7 +43,6 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
                 if (sanitized.length > 0 && sanitized.length <= 500) {
                     this.messages.push({ role: 'user', text: sanitized });
                     this.updateWebview();
-                    // 触发回调让芙宁娜回复
                     this.onUserMessage?.(sanitized);
                 }
             }
@@ -55,7 +56,17 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
         this.updateWebview();
     }
 
-    /** 限制消息数量，超出时淘汰旧消息 */
+    /** 更新统计数据到面板 */
+    updateStats(stats: FurinaStats): void {
+        this.stats = stats;
+        if (this.view) {
+            this.view.webview.postMessage({
+                type: 'statsUpdate',
+                stats: this.stats,
+            });
+        }
+    }
+
     private trimMessages(): void {
         const MAX_MESSAGES = 200;
         if (this.messages.length > MAX_MESSAGES) {
@@ -112,6 +123,26 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
       display: block;
       margin-top: 2px;
     }
+    /* 统计面板 */
+    .stats-bar {
+      display: flex;
+      justify-content: space-around;
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(110, 198, 255, 0.15);
+      font-size: 11px;
+      color: rgba(205, 214, 244, 0.7);
+    }
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .stat-value {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--furina-gold);
+    }
     #chat {
       flex: 1;
       overflow-y: auto;
@@ -128,6 +159,26 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
       line-height: 1.5;
       animation: fadeIn 0.3s ease;
       word-wrap: break-word;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .msg .avatar {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .msg .bubble { flex: 1; min-width: 0; }
+    .msg .name {
+      font-size: 11px;
+      margin-bottom: 4px;
+      font-weight: 600;
     }
     .msg.furina {
       align-self: flex-start;
@@ -135,27 +186,29 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
       border: 1px solid rgba(110, 198, 255, 0.25);
       color: var(--furina-fg);
     }
-    .msg.furina::before {
-      content: '🎭 芙宁娜';
-      display: block;
-      font-size: 11px;
-      color: var(--furina-blue);
-      margin-bottom: 4px;
-      font-weight: 600;
-    }
+    .msg.furina .name { color: var(--furina-blue); }
+    .msg.furina .avatar { background: rgba(110, 198, 255, 0.2); }
     .msg.user {
       align-self: flex-end;
+      flex-direction: row-reverse;
       background: rgba(255, 213, 79, 0.1);
       border: 1px solid rgba(255, 213, 79, 0.2);
     }
-    .msg.user::before {
-      content: '🎤 旅行者';
-      display: block;
-      font-size: 11px;
-      color: var(--furina-gold);
-      margin-bottom: 4px;
-      font-weight: 600;
-      text-align: right;
+    .msg.user .name { color: var(--furina-gold); text-align: right; }
+    .msg.user .avatar { background: rgba(255, 213, 79, 0.2); }
+    /* 打字机光标 */
+    .typing-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 14px;
+      background: var(--furina-blue);
+      margin-left: 2px;
+      animation: blink 0.6s infinite;
+      vertical-align: text-bottom;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
     }
     .input-area {
       display: flex;
@@ -173,9 +226,7 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
       font-size: 13px;
       outline: none;
     }
-    #userInput:focus {
-      border-color: var(--furina-blue);
-    }
+    #userInput:focus { border-color: var(--furina-blue); }
     #sendBtn {
       background: var(--furina-blue);
       color: #1e1e2e;
@@ -198,6 +249,11 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
     🎭 芙宁娜的舞台
     <span>工作陪伴 · 番茄钟 · 审判席</span>
   </div>
+  <div class="stats-bar">
+    <div class="stat-item"><span class="stat-value" id="statPomodoro">0</span><span>🍅 番茄</span></div>
+    <div class="stat-item"><span class="stat-value" id="statMsg">0</span><span>💬 对话</span></div>
+    <div class="stat-item"><span class="stat-value" id="statSave">0</span><span>💾 保存</span></div>
+  </div>
   <div id="chat"></div>
   <div class="input-area">
     <input id="userInput" type="text" placeholder="对芙宁娜说点什么…" maxlength="500" />
@@ -210,32 +266,123 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
     const input = document.getElementById('userInput');
     const btn = document.getElementById('sendBtn');
 
+    let typewriterQueue = [];
+    let isTyping = false;
+    let lastMessageCount = 0;
+
+    function createMsgEl(m, skipTypewriter) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + m.role;
+
+      const avatar = document.createElement('span');
+      avatar.className = 'avatar';
+      avatar.textContent = m.role === 'furina' ? '🎭' : '🎤';
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = m.role === 'furina' ? '芙宁娜' : '旅行者';
+      bubble.appendChild(name);
+
+      const content = document.createElement('span');
+      content.className = 'content';
+      bubble.appendChild(content);
+
+      div.appendChild(avatar);
+      div.appendChild(bubble);
+
+      if (m.role === 'furina' && !skipTypewriter) {
+        return { el: div, content: content, text: m.text, needsTypewriter: true };
+      } else {
+        content.textContent = m.text;
+        return { el: div, content: content, text: m.text, needsTypewriter: false };
+      }
+    }
+
+    function typewrite(contentEl, text, callback) {
+      let i = 0;
+      const cursor = document.createElement('span');
+      cursor.className = 'typing-cursor';
+      contentEl.appendChild(cursor);
+      isTyping = true;
+
+      const speed = Math.max(20, Math.min(50, 1500 / text.length));
+      const timer = setInterval(function() {
+        if (i < text.length) {
+          contentEl.insertBefore(document.createTextNode(text[i]), cursor);
+          i++;
+          chat.scrollTop = chat.scrollHeight;
+        } else {
+          clearInterval(timer);
+          cursor.remove();
+          isTyping = false;
+          if (callback) { callback(); }
+        }
+      }, speed);
+    }
+
+    function processTypewriterQueue() {
+      if (typewriterQueue.length === 0) { return; }
+      const item = typewriterQueue.shift();
+      typewrite(item.content, item.text, function() { processTypewriterQueue(); });
+    }
+
     function renderMessages(messages) {
-      chat.innerHTML = '';
-      messages.forEach(m => {
-        const div = document.createElement('div');
-        div.className = 'msg ' + m.role;
-        div.textContent = m.text;
-        chat.appendChild(div);
-      });
+      var isNewBatch = messages.length > lastMessageCount;
+      var newStart = isNewBatch ? lastMessageCount : 0;
+
+      if (!isNewBatch) {
+        chat.innerHTML = '';
+        typewriterQueue = [];
+        messages.forEach(function(m) {
+          var result = createMsgEl(m, true);
+          chat.appendChild(result.el);
+        });
+      } else {
+        for (var i = newStart; i < messages.length; i++) {
+          var result = createMsgEl(messages[i], false);
+          chat.appendChild(result.el);
+          if (result.needsTypewriter) {
+            typewriterQueue.push(result);
+          }
+        }
+        if (!isTyping && typewriterQueue.length > 0) {
+          processTypewriterQueue();
+        }
+      }
+
+      lastMessageCount = messages.length;
       chat.scrollTop = chat.scrollHeight;
     }
 
-    btn.addEventListener('click', () => {
-      const text = input.value.trim();
-      if (!text) return;
+    function updateStats(stats) {
+      var sp = document.getElementById('statPomodoro');
+      var sm = document.getElementById('statMsg');
+      var ss = document.getElementById('statSave');
+      if (sp) { sp.textContent = stats.todayPomodoros; }
+      if (sm) { sm.textContent = stats.todayMessages; }
+      if (ss) { ss.textContent = stats.todaySaves; }
+    }
+
+    btn.addEventListener('click', function() {
+      var text = input.value.trim();
+      if (!text) { return; }
       vscode.postMessage({ type: 'userMessage', text: text });
       input.value = '';
     });
 
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') btn.click();
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { btn.click(); }
     });
 
-    window.addEventListener('message', (e) => {
-      const msg = e.data;
+    window.addEventListener('message', function(e) {
+      var msg = e.data;
       if (msg.type === 'update') {
         renderMessages(msg.messages);
+      } else if (msg.type === 'statsUpdate') {
+        updateStats(msg.stats);
       }
     });
   </script>

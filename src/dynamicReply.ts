@@ -3,6 +3,7 @@
  * 包含关键词匹配和基于情感的回复策略
  */
 
+import * as vscode from 'vscode';
 import { getComfort, getEncourageLine, getWorkLine } from './persona';
 
 // ─── 情感识别关键词 ─────────────────────────────────────
@@ -150,4 +151,79 @@ export function generateResponse(userMessage: string): string {
         '嗯哼。继续，我洗耳恭听。',
     ];
     return defaults[Math.floor(Math.random() * defaults.length)];
+}
+
+// ─── 智能代码分析 ───────────────────────────────────────
+
+/** 分析当前工作区诊断并生成芙宁娜风格的代码建议 */
+export function analyzeCodeProblems(): string {
+    const diagnostics = vscode.languages.getDiagnostics();
+    let errorCount = 0;
+    let warningCount = 0;
+    const errorFiles: string[] = [];
+
+    for (const [uri, diags] of diagnostics) {
+        let hasError = false;
+        for (const d of diags) {
+            if (d.severity === vscode.DiagnosticSeverity.Error) {
+                errorCount++;
+                hasError = true;
+            } else if (d.severity === vscode.DiagnosticSeverity.Warning) {
+                warningCount++;
+            }
+        }
+        if (hasError) {
+            errorFiles.push(vscode.workspace.asRelativePath(uri));
+        }
+    }
+
+    if (errorCount === 0 && warningCount === 0) {
+        const clean = [
+            '哦？不错嘛，目前没有任何错误和警告。继续保持，别让我失望。',
+            '嗯，代码整洁无误。看来你今天状态不错，本大导演表示认可。',
+            '零错误零警告。完美——不过别得意，维持这种水平才是真本事。',
+        ];
+        return clean[Math.floor(Math.random() * clean.length)];
+    }
+
+    const parts: string[] = [];
+
+    if (errorCount > 0) {
+        parts.push(`发现 ${errorCount} 个错误`);
+        if (errorFiles.length <= 3) {
+            parts.push(`集中在 ${errorFiles.join('、')}`);
+        } else {
+            parts.push(`涉及 ${errorFiles.length} 个文件`);
+        }
+    }
+    if (warningCount > 0) {
+        parts.push(`另有 ${warningCount} 个警告`);
+    }
+
+    const summary = parts.join('，');
+
+    if (errorCount >= 10) {
+        const severe = [
+            `${summary}。这……简直是一场灾难。你最好赶紧坐下来认真修。`,
+            `${summary}。本大导演看了都头疼，你到底在写什么？`,
+            `${summary}。哼，我给你个建议——先深呼吸，然后从编译错误最多的文件开始修。`,
+        ];
+        return severe[Math.floor(Math.random() * severe.length)];
+    }
+
+    if (errorCount > 0) {
+        const medium = [
+            `${summary}。去处理干净吧，我会在这里盯着你的。`,
+            `${summary}。不算太糟，但也别拖着不改。快去修复，我等你的好消息。`,
+            `${summary}。作为导演，我的建议是——先解决 error，warning 可以稍后处理。`,
+        ];
+        return medium[Math.floor(Math.random() * medium.length)];
+    }
+
+    // Only warnings
+    const mild = [
+        `没有错误，但有 ${warningCount} 个警告。虽非致命，但精益求精才配得上本导演的舞台。`,
+        `${warningCount} 个警告。勉强合格。想要完美评价？把它们也清掉。`,
+    ];
+    return mild[Math.floor(Math.random() * mild.length)];
 }
