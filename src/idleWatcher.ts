@@ -1,19 +1,17 @@
 /**
- * 闲置检测模块 — 在用户长时间无操作时发出芙宁娜式提醒
+ * 闲置检测 — 长时间未操作时发出芙宁娜式提醒
  */
+
 import * as vscode from 'vscode';
-import { getIdleRemind } from './persona';
 
 export class IdleWatcher {
-    private timer: ReturnType<typeof setTimeout> | undefined;
-    private onIdle: (msg: string) => void;
+    private timer?: ReturnType<typeof setTimeout>;
 
-    constructor(onIdle: (msg: string) => void) {
-        this.onIdle = onIdle;
+    constructor(private readonly onIdle: () => void) {
+        this.reset();
     }
 
-    /** 重置闲置计时器（每次用户操作时调用） */
-    reset(): void {
+    public reset(): void {
         if (this.timer) {
             clearTimeout(this.timer);
         }
@@ -26,13 +24,11 @@ export class IdleWatcher {
 
         const minutes = config.get<number>('idleMinutes', 30);
         this.timer = setTimeout(() => {
-            const msg = getIdleRemind();
-            vscode.window.showInformationMessage(`🎭 芙宁娜：${msg}`);
-            this.onIdle(msg);
+            this.onIdle();
         }, minutes * 60 * 1000);
     }
 
-    dispose(): void {
+    public dispose(): void {
         if (this.timer) {
             clearTimeout(this.timer);
         }

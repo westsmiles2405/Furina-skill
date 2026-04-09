@@ -1,33 +1,48 @@
 /**
- * 芙宁娜工作陪伴 — VS Code 扩展入口
+ * 芙宁娜工作陪伴 — 主入口
  */
+
 import * as vscode from 'vscode';
 import { FurinaChatPanel } from './chatPanel';
 import { PomodoroTimer } from './pomodoro';
 import { IdleWatcher } from './idleWatcher';
 import { StatsTracker } from './stats';
 import {
-    getTimeBasedGreeting,
+    getOpening,
+    getWorkLine,
     getEncourageLine,
     getJudgment,
+    getFocusStart,
+    getFocusEnd,
+    getBreakRemind,
+    getBreakEnd,
     getFinale,
-    getWorkLine,
+    getIdleRemind,
+    getTimeBasedGreeting,
+    getMonologue,
+    getSnackRecommendation,
+    getNeuvilletteEasterEgg,
 } from './persona';
-import { generateResponse, analyzeCodeProblems } from './dynamicReply';
+import {
+    generateResponse,
+    analyzeCodeProblems,
+    CODE_ANALYSIS_KEYWORDS,
+} from './dynamicReply';
 
-let chatPanel: FurinaChatPanel;
-let pomodoro: PomodoroTimer;
-let idleWatcher: IdleWatcher;
-let stats: StatsTracker;
+export function activate(context: vscode.ExtensionContext): void {
+    // ── 核心模块 ─────────────────────────────────────
+    const panel = new FurinaChatPanel(context.extensionUri);
+    const pomodoro = new PomodoroTimer();
+    const stats = new StatsTracker(context.globalState);
 
-export function activate(context: vscode.ExtensionContext) {
-    // ─── 数据统计 ─────────────────────────────────────────
-    stats = new StatsTracker(context.globalState);
+    const idleWatcher = new IdleWatcher(() => {
+        panel.addBotMessage(getIdleRemind());
+    });
 
-    // ─── 状态栏 ─────────────────────────────────────────
+    // ── 常驻状态栏 ──────────────────────────────────
     const statusBar = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,
-        100
+        100,
     );
     statusBar.text = '🎭 芙宁娜';
     statusBar.tooltip = '芙宁娜工作陪伴';
@@ -40,185 +55,174 @@ export function activate(context: vscode.ExtensionContext) {
     }
     context.subscriptions.push(statusBar);
 
-    // ─── 侧边栏面板 ──────────────────────────────────────
-    chatPanel = new FurinaChatPanel(context.extensionUri);
+    // ── 注册 Webview ─────────────────────────────────
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(
-            FurinaChatPanel.viewType,
-            chatPanel
-        )
+        vscode.window.registerWebviewViewProvider(FurinaChatPanel.viewType, panel),
     );
 
-    // ─── 番茄钟 ─────────────────────────────────────────
-    pomodoro = new PomodoroTimer(
-        statusBar,
-        (msg) => chatPanel.addFurinaMessage(msg),
-        (msg) => {
-            chatPanel.addFurinaMessage(msg);
-            stats.recordPomodoro();
-            chatPanel.updateStats(stats.data);
+    // ── 用户消息处理 ──────────────────────────────────
+    panel.setOnUserMessage((text) => {
+        stats.recordMessage();
+        panel.updateStats(stats.current);
+        idleWatcher.reset();
+
+        const lower = text.toLowerCase();
+        if (CODE_ANALYSIS_KEYWORDS.some((k) => lower.includes(k))) {
+            panel.addBotMessage(analyzeCodeProblems());
+            return;
         }
-    );
 
-    // ─── 闲置监测 ──────────────────────────────────────
-    idleWatcher = new IdleWatcher((msg) => chatPanel.addFurinaMessage(msg));
+        const reply = generateResponse(text);
+        panel.addBotMessage(reply);
+    });
 
-    // 用户输入时重置闲置计时器
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeTextDocument(() => idleWatcher.reset()),
-        vscode.window.onDidChangeActiveTextEditor(() => idleWatcher.reset())
-    );
-    idleWatcher.reset();
+    // ── 首次欢迎引导 ──────────────────────────────────
+    const welcomed = context.globalState.get<boolean>('furina.welcomed', false);
+    if (!welcomed) {
+        panel.addBotMessage(
+            '欢迎来到芙宁娜的舞台！初次见面，容我自我介绍——我是枫丹的水之大导演，芙宁娜。',
+        );
+        panel.addBotMessage(
+            '📌 小提示：\n' +
+            '• 在输入框跟我聊天，我会根据你说的话回复\n' +
+            '• 按 Ctrl+Shift+P 搜索"芙宁娜"查看所有命令\n' +
+            '• 试试"开始番茄钟专注"让我陪你计时\n' +
+            '• 说"检查代码"让我帮你分析当前错误',
+        );
+        panel.addBotMessage(
+            '好了，介绍完毕。准备好了就开始工作吧——聚光灯已经落下来了，别发呆。',
+        );
+        void context.globalState.update('furina.welcomed', true);
+    } else {
+        panel.addBotMessage(getTimeBasedGreeting());
+    }
 
-    // ─── 命令注册 ──────────────────────────────────────
+    // 初始推送统计
+    panel.updateStats(stats.current);
 
-    // 开启今日舞台
+    // ── 命令注册 ──────────────────────────────────────
     context.subscriptions.push(
         vscode.commands.registerCommand('furina.openStage', () => {
-            const greeting = getTimeBasedGreeting();
-            chatPanel.addFurinaMessage(greeting);
-            vscode.window.showInformationMessage(`🎭 芙宁娜：${greeting}`);
-        })
-    );
+            const msg = getOpening();
+            panel.addBotMessage(msg);
+            panel.addBotMessage(getTimeBasedGreeting());
+            void vscode.window.showInformationMessage(`🎭 芙宁娜：${msg}`);
+        }),
 
-    // 开始番茄钟
-    context.subscriptions.push(
         vscode.commands.registerCommand('furina.startPomodoro', () => {
-            pomodoro.start();
-        })
-    );
-
-    // 结束番茄钟
-    context.subscriptions.push(
-        vscode.commands.registerCommand('furina.stopPomodoro', () => {
             if (pomodoro.isRunning) {
-                pomodoro.stop();
-                const msg = '番茄钟被提前终止了。哼，虽然有点可惜，但也不是不能原谅。';
-                chatPanel.addFurinaMessage(msg);
-                vscode.window.showInformationMessage(`🎭 芙宁娜：${msg}`);
-            } else {
-                vscode.window.showInformationMessage('🎭 芙宁娜：番茄钟还没开始呢，急什么？');
+                panel.addBotMessage('诶？番茄钟已经在跑了啊~别急别急，先把当前这一幕演完！');
+                return;
             }
-        })
-    );
+            const config = vscode.workspace.getConfiguration('furina');
+            const minutes = config.get<number>('pomodoroMinutes', 25);
+            panel.addBotMessage(getFocusStart(minutes));
 
-    // 给我打气
-    context.subscriptions.push(
+            pomodoro.start(minutes, (phase) => {
+                switch (phase) {
+                    case 'focus-end':
+                        panel.addBotMessage(getFocusEnd());
+                        stats.recordPomodoro();
+                        panel.updateStats(stats.current);
+                        break;
+                    case 'break-start':
+                        panel.addBotMessage(getBreakRemind());
+                        break;
+                    case 'break-end':
+                        panel.addBotMessage(getBreakEnd());
+                        break;
+                }
+            });
+        }),
+
+        vscode.commands.registerCommand('furina.stopPomodoro', () => {
+            if (!pomodoro.isRunning) {
+                panel.addBotMessage('番茄钟还没开始呢，急什么？');
+                return;
+            }
+            pomodoro.stop();
+            panel.addBotMessage('番茄钟被提前终止了。哼，虽然有点可惜，但也不是不能原谅。');
+        }),
+
         vscode.commands.registerCommand('furina.encourageMe', () => {
             const msg = getEncourageLine();
-            chatPanel.addFurinaMessage(msg);
-            vscode.window.showInformationMessage(`🎭 芙宁娜：${msg}`);
-        })
-    );
+            panel.addBotMessage(msg);
+            void vscode.window.showInformationMessage(`🎭 芙宁娜：${msg}`);
+        }),
 
-    // 审判我的代码
-    context.subscriptions.push(
-        vscode.commands.registerCommand('furina.reviewWork', async () => {
+        vscode.commands.registerCommand('furina.reviewWork', () => {
             const diagnostics = vscode.languages.getDiagnostics();
             const issues: string[] = [];
-
             for (const [uri, diags] of diagnostics) {
                 for (const d of diags) {
                     if (d.severity === vscode.DiagnosticSeverity.Error) {
                         const fileName = vscode.workspace.asRelativePath(uri);
                         issues.push(
-                            `${fileName}:${d.range.start.line + 1} — ${d.message}`
+                            `${fileName}:${d.range.start.line + 1} — ${d.message}`,
                         );
                     }
                 }
             }
-
-            // 最多展示 10 条
+            const totalErrors = issues.length;
             const topIssues = issues.slice(0, 10);
             if (issues.length > 10) {
                 topIssues.push(`……以及另外 ${issues.length - 10} 项问题。`);
             }
-
-            const judgment = getJudgment(topIssues);
-            chatPanel.addFurinaMessage(judgment);
-            vscode.window.showInformationMessage(
-                `🎭 芙宁娜开庭审判：发现 ${issues.length} 项错误`
+            panel.addBotMessage(getJudgment(topIssues));
+            void vscode.window.showInformationMessage(
+                `🎭 芙宁娜开庭审判：发现 ${totalErrors} 项错误`,
             );
-        })
-    );
+        }),
 
-    // 今日谢幕
-    context.subscriptions.push(
         vscode.commands.registerCommand('furina.finale', () => {
             const msg = getFinale(pomodoro.completedCount);
-            chatPanel.addFurinaMessage(msg);
-            vscode.window.showInformationMessage(`🎭 芙宁娜：${msg}`);
-        })
+            panel.addBotMessage(msg);
+            pomodoro.stop();
+            void vscode.window.showInformationMessage(`🎭 芙宁娜：${msg}`);
+        }),
+
+        vscode.commands.registerCommand('furina.monologue', () => {
+            panel.addBotMessage(getMonologue());
+        }),
+
+        vscode.commands.registerCommand('furina.snack', () => {
+            panel.addBotMessage(getSnackRecommendation());
+        }),
+
+        vscode.commands.registerCommand('furina.neuvillette', () => {
+            panel.addBotMessage(getNeuvilletteEasterEgg());
+        }),
     );
 
-    // ─── 用户消息回复 ─────────────────────────────────
-    chatPanel.setOnUserMessage((text) => {
-        stats.recordMessage();
-        chatPanel.updateStats(stats.data);
-
-        // 如果用户问代码状况，给出智能分析
-        const lower = text.toLowerCase();
-        if (
-            lower.includes('分析') ||
-            lower.includes('诊断') ||
-            lower.includes('检查代码') ||
-            lower.includes('代码质量') ||
-            lower.includes('有没有错')
-        ) {
-            const analysis = analyzeCodeProblems();
-            chatPanel.addFurinaMessage(analysis);
-            return;
-        }
-
-        const reply = generateResponse(text);
-        chatPanel.addFurinaMessage(reply);
-    });
-
-    // ─── 启动问候 ──────────────────────────────────────
-    const isFirstTime = !context.globalState.get<boolean>('furina.welcomed');
-    if (isFirstTime) {
-        context.globalState.update('furina.welcomed', true);
-        chatPanel.addFurinaMessage(
-            '欢迎来到芙宁娜的舞台！初次见面，容我自我介绍——我是枫丹的水之大导演，芙宁娜。'
-        );
-        chatPanel.addFurinaMessage(
-            '📌 小提示：\n' +
-            '• 在输入框跟我聊天，我会根据你说的话回复\n' +
-            '• 按 Ctrl+Shift+P 搜索"芙宁娜"查看所有命令\n' +
-            '• 试试"开始番茄钟专注"让我陪你计时\n' +
-            '• 说"检查代码"让我帮你分析当前错误'
-        );
-        chatPanel.addFurinaMessage(
-            '好了，介绍完毕。准备好了就开始工作吧——聚光灯已经落下来了，别发呆。'
-        );
-    } else {
-        const greeting = getTimeBasedGreeting();
-        chatPanel.addFurinaMessage(greeting);
-    }
-
-    // 初始推送统计
-    chatPanel.updateStats(stats.data);
-
-    // 工作时偶尔插话
-    let editCount = 0;
+    // ── 保存事件 → 统计 + 彩蛋 ──────────────────────
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(() => {
-            editCount++;
             stats.recordSave();
-            chatPanel.updateStats(stats.data);
-            if (editCount % 10 === 0) {
-                const line = getWorkLine();
-                chatPanel.addFurinaMessage(line);
+            panel.updateStats(stats.current);
+            idleWatcher.reset();
+            if (stats.current.todaySaves % 10 === 0) {
+                panel.addBotMessage(getWorkLine());
             }
-        })
+        }),
     );
+
+    // ── 编辑事件 → 重置闲置 ──────────────────────────
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument(() => {
+            idleWatcher.reset();
+        }),
+        vscode.window.onDidChangeActiveTextEditor(() => {
+            idleWatcher.reset();
+        }),
+    );
+
+    // ── 清理 ──────────────────────────────────────────
+    context.subscriptions.push({
+        dispose() {
+            pomodoro.dispose();
+            idleWatcher.dispose();
+        },
+    });
 }
 
-export function deactivate() {
-    if (idleWatcher) {
-        idleWatcher.dispose();
-    }
-    if (pomodoro?.isRunning) {
-        pomodoro.stop();
-    }
-}
+export function deactivate(): void { }

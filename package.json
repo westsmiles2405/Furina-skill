@@ -69,6 +69,21 @@
                 "command": "furina.finale",
                 "title": "芙宁娜：今日谢幕",
                 "category": "Furina"
+            },
+            {
+                "command": "furina.monologue",
+                "title": "芙宁娜：即兴独白",
+                "category": "Furina"
+            },
+            {
+                "command": "furina.snack",
+                "title": "芙宁娜：甜品时间",
+                "category": "Furina"
+            },
+            {
+                "command": "furina.neuvillette",
+                "title": "芙宁娜：聊聊那维莱特",
+                "category": "Furina"
             }
         ],
         "configuration": {

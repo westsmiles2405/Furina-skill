@@ -1,33 +1,36 @@
 /**
  * 芙宁娜 Webview 侧边栏面板
  */
-import * as vscode from 'vscode';
 import * as crypto from 'crypto';
-import type { FurinaStats } from './stats';
+import * as vscode from 'vscode';
+import { FurinaStats } from './stats';
 
 function getNonce(): string {
     return crypto.randomBytes(16).toString('hex');
 }
 
+interface PendingMessage {
+    from: 'furina' | 'user';
+    text: string;
+}
+
 export class FurinaChatPanel implements vscode.WebviewViewProvider {
     public static readonly viewType = 'furina.chatPanel';
     private view?: vscode.WebviewView;
-    private messages: Array<{ role: 'furina' | 'user'; text: string }> = [];
-    private stats?: FurinaStats;
-
+    private messages: PendingMessage[] = [];
     private onUserMessage?: (text: string) => void;
+    private latestStats?: FurinaStats;
 
     constructor(private readonly extensionUri: vscode.Uri) { }
 
-    /** 注册用户消息回调 */
-    setOnUserMessage(handler: (text: string) => void): void {
+    public setOnUserMessage(handler: (text: string) => void): void {
         this.onUserMessage = handler;
     }
 
-    resolveWebviewView(
+    public resolveWebviewView(
         webviewView: vscode.WebviewView,
         _context: vscode.WebviewViewResolveContext,
-        _token: vscode.CancellationToken
+        _token: vscode.CancellationToken,
     ): void {
         this.view = webviewView;
         webviewView.webview.options = {
@@ -36,33 +39,33 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
         };
         webviewView.webview.html = this.getHtml();
 
-        // 处理用户输入
         webviewView.webview.onDidReceiveMessage((data) => {
             if (data.type === 'userMessage' && typeof data.text === 'string') {
-                const sanitized = data.text.trim();
-                if (sanitized.length > 0 && sanitized.length <= 500) {
-                    this.messages.push({ role: 'user', text: sanitized });
-                    this.updateWebview();
-                    this.onUserMessage?.(sanitized);
+                const trimmed = data.text.trim();
+                if (trimmed && trimmed.length <= 500) {
+                    this.messages.push({ from: 'user', text: trimmed });
+                    this.trimMessages();
+                    this.syncMessages();
+                    this.onUserMessage?.(trimmed);
                 }
             }
         });
+
+        this.syncMessages();
     }
 
-    /** 向面板追加芙宁娜的台词 */
-    addFurinaMessage(text: string): void {
-        this.messages.push({ role: 'furina', text });
+    public addBotMessage(text: string): void {
+        this.messages.push({ from: 'furina', text });
         this.trimMessages();
-        this.updateWebview();
+        this.syncMessages();
     }
 
-    /** 更新统计数据到面板 */
-    updateStats(stats: FurinaStats): void {
-        this.stats = stats;
+    public updateStats(stats: FurinaStats): void {
+        this.latestStats = stats;
         if (this.view) {
             this.view.webview.postMessage({
-                type: 'statsUpdate',
-                stats: this.stats,
+                type: 'updateStats',
+                stats,
             });
         }
     }
@@ -74,11 +77,18 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
         }
     }
 
-    private updateWebview(): void {
-        if (this.view) {
+    private syncMessages(): void {
+        if (!this.view) {
+            return;
+        }
+        this.view.webview.postMessage({
+            type: 'messages',
+            messages: this.messages,
+        });
+        if (this.latestStats) {
             this.view.webview.postMessage({
-                type: 'update',
-                messages: this.messages,
+                type: 'updateStats',
+                stats: this.latestStats,
             });
         }
     }
@@ -91,9 +101,9 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+        content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
   <title>芙宁娜的舞台</title>
-  <style>
+  <style nonce="${nonce}">
     :root {
       --furina-blue: #6ec6ff;
       --furina-gold: #ffd54f;
@@ -266,125 +276,102 @@ export class FurinaChatPanel implements vscode.WebviewViewProvider {
     const input = document.getElementById('userInput');
     const btn = document.getElementById('sendBtn');
 
-    let typewriterQueue = [];
+    let renderedCount = 0;
+    let typeQueue = [];
     let isTyping = false;
-    let lastMessageCount = 0;
 
-    function createMsgEl(m, skipTypewriter) {
-      const div = document.createElement('div');
-      div.className = 'msg ' + m.role;
-
-      const avatar = document.createElement('span');
-      avatar.className = 'avatar';
-      avatar.textContent = m.role === 'furina' ? '🎭' : '🎤';
-
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-
-      const name = document.createElement('div');
-      name.className = 'name';
-      name.textContent = m.role === 'furina' ? '芙宁娜' : '旅行者';
-      bubble.appendChild(name);
-
-      const content = document.createElement('span');
-      content.className = 'content';
-      bubble.appendChild(content);
-
-      div.appendChild(avatar);
-      div.appendChild(bubble);
-
-      if (m.role === 'furina' && !skipTypewriter) {
-        return { el: div, content: content, text: m.text, needsTypewriter: true };
-      } else {
-        content.textContent = m.text;
-        return { el: div, content: content, text: m.text, needsTypewriter: false };
-      }
-    }
-
-    function typewrite(contentEl, text, callback) {
-      let i = 0;
-      const cursor = document.createElement('span');
-      cursor.className = 'typing-cursor';
-      contentEl.appendChild(cursor);
-      isTyping = true;
-
-      const speed = Math.max(20, Math.min(50, 1500 / text.length));
-      const timer = setInterval(function() {
-        if (i < text.length) {
-          contentEl.insertBefore(document.createTextNode(text[i]), cursor);
-          i++;
-          chat.scrollTop = chat.scrollHeight;
-        } else {
-          clearInterval(timer);
-          cursor.remove();
-          isTyping = false;
-          if (callback) { callback(); }
-        }
-      }, speed);
-    }
-
-    function processTypewriterQueue() {
-      if (typewriterQueue.length === 0) { return; }
-      const item = typewriterQueue.shift();
-      typewrite(item.content, item.text, function() { processTypewriterQueue(); });
-    }
-
-    function renderMessages(messages) {
-      var isNewBatch = messages.length > lastMessageCount;
-      var newStart = isNewBatch ? lastMessageCount : 0;
-
-      if (!isNewBatch) {
-        chat.innerHTML = '';
-        typewriterQueue = [];
-        messages.forEach(function(m) {
-          var result = createMsgEl(m, true);
-          chat.appendChild(result.el);
-        });
-      } else {
-        for (var i = newStart; i < messages.length; i++) {
-          var result = createMsgEl(messages[i], false);
-          chat.appendChild(result.el);
-          if (result.needsTypewriter) {
-            typewriterQueue.push(result);
-          }
-        }
-        if (!isTyping && typewriterQueue.length > 0) {
-          processTypewriterQueue();
-        }
-      }
-
-      lastMessageCount = messages.length;
-      chat.scrollTop = chat.scrollHeight;
-    }
-
-    function updateStats(stats) {
-      var sp = document.getElementById('statPomodoro');
-      var sm = document.getElementById('statMsg');
-      var ss = document.getElementById('statSave');
-      if (sp) { sp.textContent = stats.todayPomodoros; }
-      if (sm) { sm.textContent = stats.todayMessages; }
-      if (ss) { ss.textContent = stats.todaySaves; }
-    }
-
-    btn.addEventListener('click', function() {
-      var text = input.value.trim();
-      if (!text) { return; }
-      vscode.postMessage({ type: 'userMessage', text: text });
+    function send() {
+      var t = input.value.trim();
+      if (!t) return;
+      vscode.postMessage({ type: 'userMessage', text: t });
       input.value = '';
-    });
-
+    }
+    btn.addEventListener('click', send);
     input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') { btn.click(); }
+      if (e.key === 'Enter') send();
     });
 
     window.addEventListener('message', function(e) {
       var msg = e.data;
-      if (msg.type === 'update') {
-        renderMessages(msg.messages);
-      } else if (msg.type === 'statsUpdate') {
-        updateStats(msg.stats);
-      }
+      if (msg.type === 'messages') renderAll(msg.messages);
+      if (msg.type === 'updateStats') updateStats(msg.stats);
     });
+
+    function updateStats(s) {
+      var sp = document.getElementById('statPomodoro');
+      var sm = document.getElementById('statMsg');
+      var ss = document.getElementById('statSave');
+      if (sp) { sp.textContent = s.todayPomodoros || 0; }
+      if (sm) { sm.textContent = s.todayMessages || 0; }
+      if (ss) { ss.textContent = s.todaySaves || 0; }
+    }
+
+    function renderAll(msgs) {
+      for (var i = renderedCount; i < msgs.length; i++) {
+        var m = msgs[i];
+        var div = document.createElement('div');
+        div.className = 'msg ' + m.from;
+
+        var avatar = document.createElement('span');
+        avatar.className = 'avatar';
+        avatar.textContent = m.from === 'furina' ? '🎭' : '🎤';
+
+        var bubble = document.createElement('div');
+        bubble.className = 'bubble';
+
+        var name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = m.from === 'furina' ? '芙宁娜' : '旅行者';
+        bubble.appendChild(name);
+
+        var content = document.createElement('span');
+        content.className = 'content';
+        bubble.appendChild(content);
+
+        div.appendChild(avatar);
+        div.appendChild(bubble);
+        chat.appendChild(div);
+
+        if (m.from === 'furina') {
+          enqueueType(content, m.text);
+        } else {
+          content.textContent = m.text;
+        }
+      }
+      renderedCount = msgs.length;
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function enqueueType(el, text) {
+      typeQueue.push({ el: el, text: text });
+      if (!isTyping) processQueue();
+    }
+
+    function processQueue() {
+      if (typeQueue.length === 0) { isTyping = false; return; }
+      isTyping = true;
+      var job = typeQueue.shift();
+      typeText(job.el, job.text, function() { processQueue(); });
+    }
+
+    function typeText(el, text, cb) {
+      var idx = 0;
+      var speed = text.length > 60 ? 20 : text.length > 30 ? 30 : 45;
+      var cur = document.createElement('span');
+      cur.className = 'typing-cursor';
+      el.appendChild(cur);
+      var timer = setInterval(function() {
+        if (idx < text.length) {
+          el.insertBefore(document.createTextNode(text[idx]), cur);
+          idx++;
+          chat.scrollTop = chat.scrollHeight;
+        } else {
+          clearInterval(timer);
+          if (cur.parentNode) cur.parentNode.removeChild(cur);
+          if (cb) cb();
+        }
+      }, speed);
+    }
   </script>
 </body>
 </html>`;
